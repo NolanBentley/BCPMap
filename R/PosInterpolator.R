@@ -1,0 +1,32 @@
+PosInterpolation<-function(inpMat,currPos){
+    rows<-1:nrow(inpMat)
+    lastRow<-max(rows)
+    for(i in 1:ncol(inpMat)){
+        currCol<-inpMat[,i]
+        currCalled<-which(!is.na(currCol))
+        lastCalled<-max(currCalled)
+        if(currCalled[1]>1){
+            currCol[rows<currCalled[1]]<-currCol[currCalled[1]]
+        }
+        if(lastCalled<lastRow){
+            currCol[rows>lastCalled]<-currCol[lastCalled]
+        }
+        for(j in 2:length(currCalled)){
+            currRow<-currCalled[j]
+            prevRow<-currCalled[j-1]
+            if(currRow-prevRow>1){
+                currCall<-currCol[currRow]
+                prevCall<-currCol[prevRow]
+                if(prevCall==currCall){
+                    currCol[prevRow:currRow]<-currCall
+                }else{
+                    slope<-((currCall-prevCall)/(currPos[currRow]-currPos[prevRow]))
+                    int<-currCall-(slope*currPos[currRow])
+                    currCol[prevRow:currRow]<-currPos[prevRow:currRow]*slope+int
+                }
+            }
+        }
+        inpMat[,i]<-currCol
+    }
+    return(inpMat)
+}

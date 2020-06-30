@@ -44,11 +44,18 @@
 ######### This is completely customized for processing my files
 # Begin merging of files based on reference sequence position based on SNPs in first column of filterCutFile
 # filterCutFile is a csv file with the unique SNP names in column one and row $markerRow and lasting until the end of the file
-source('/data/Nolan/Git/BCPMap/R/SubsetCallsAndCountsFiles.R')
+
+require(devtools)
+load_all()
+require(parallel)
+require(snow)
+require(dplyr)
+cl<-makeCluster(min(detectCores()-1,36))
+
 markerRow<-3
-fileDf<-data.frame(calls=c("./examples/LxOMapCombinedDivSubset_calls.csv",#This should be the most limiting file to save memory
-                           "./examples/LxOSimulatedShotgun_4G_130bp12x25min_Vs_OaxMainV1_3-3-15_20190716_182609_sam_calls.csv",
-                           "./examples/PecanCRRDiv_844G_PstI_Vs_Carya_illinoinensis_var_87MX3.mainGenome_3-3-15_20190513_144932_sam_calls.csv"),
+fileDf<-data.frame(calls=c("../GitExamples/LxOMapCombinedDivSubset_calls.csv",#This should be the most limiting file to save memory
+                           "../GitExamples/LxOSimulatedShotgun_4G_130bp12x25min_Vs_OaxMainV1_3-3-15_20190716_182609_sam_calls.csv",
+                           "../GitExamples/PecanCRRDiv_844G_PstI_Vs_Carya_illinoinensis_var_87MX3.mainGenome_3-3-15_20190513_144932_sam_calls.csv"),
                    stringsAsFactors = F)
 fileDf$counts<-gsub("calls\\.csv","counts.csv",fileDf$calls)
 if(!all(file.exists(fileDf$calls))){stop("Call files not found")}
@@ -60,18 +67,18 @@ SubsetCallsAndCountsFiles(fileDf)
 #Check subsets
 fileDf_subset<-apply(fileDf,c(1,2),function(x){paste0(gsub("\\.csv","",x),"_subset.csv")})
 if(!all(file.exists(fileDf_subset))){stop("A subset file was not found")}
-markerNames<-apply(fileDf_subset,c(1,2),cutFunction)
+markerNames<-parApply(cl,fileDf_subset,c(1,2),cutFunction)
 if(!all(c(all(markerNames[,1,1]==markerNames[,2,1]),all(markerNames[,1,1]==markerNames[,3,1]),
           all(markerNames[,1,1]==markerNames[,1,2]),all(markerNames[,1,1]==markerNames[,2,2]),
           all(markerNames[,1,1]==markerNames[,3,2])))){stop("Subsets don't match")}
 
 #Calculate call file statistics
-callStrPath<-fileDf_subset[1,1]
-rowVector<-3:length(markerNames[,1,1])
-colVector<-5
+csvList<-parApply(cl,fileDf_subset,c(1,2),readCallsAndCounts)
+callsList<-list(calls=bind_cols(lapply(csvList,function(x){x[[1]]})),callsInfo=csvList[[1]][[2]])
+colnames(callsList$calls)
 
-rowsKept<-markerNames[,1,1]
-names(rowsKept)<-rowsKept
-rowsKept[1:2]<-NA
+stopCluster(cl)
+callsListList$LxO<-GBSImport(file_calls = fileDf_subset[1,1],fileDf_subset[1,2])
+callsListList$Sim<-GBSImport(file_calls = fileDf_subset[2,1],fileDf_subset[2,2])
+callsListList$Div<-GBSImport(file_calls = fileDf_subset[3,1],fileDf_subset[3,2])
 
-csvList<-apply(fileDf_subset,c(1,2),readCallsAndCounts)
