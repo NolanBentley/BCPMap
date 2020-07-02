@@ -46,39 +46,158 @@
 # filterCutFile is a csv file with the unique SNP names in column one and row $markerRow and lasting until the end of the file
 
 require(devtools)
-load_all()
 require(parallel)
 require(snow)
 require(dplyr)
-cl<-makeCluster(min(detectCores()-1,36))
+require(rlist)
 
+load_all()
 markerRow<-3
+storageDir<-"../GitExamples"
 fileDf<-data.frame(calls=c("../GitExamples/LxOMapCombinedDivSubset_calls.csv",#This should be the most limiting file to save memory
                            "../GitExamples/LxOSimulatedShotgun_4G_130bp12x25min_Vs_OaxMainV1_3-3-15_20190716_182609_sam_calls.csv",
                            "../GitExamples/PecanCRRDiv_844G_PstI_Vs_Carya_illinoinensis_var_87MX3.mainGenome_3-3-15_20190513_144932_sam_calls.csv"),
                    stringsAsFactors = F)
 fileDf$counts<-gsub("calls\\.csv","counts.csv",fileDf$calls)
-if(!all(file.exists(fileDf$calls))){stop("Call files not found")}
-if(!all(file.exists(fileDf$counts))){stop("Count files corresponding to the names of the call files not found")}
+datasetNames<-c("LxO","Sim","Div")
+progenyMappedFile<-"../GitExamples/SampleNamesMapped.txt"
 
-#Produces subset versions of the input call and count files with a combined marker set
-SubsetCallsAndCountsFiles(fileDf)
 
-#Check subsets
-fileDf_subset<-apply(fileDf,c(1,2),function(x){paste0(gsub("\\.csv","",x),"_subset.csv")})
-if(!all(file.exists(fileDf_subset))){stop("A subset file was not found")}
-markerNames<-parApply(cl,fileDf_subset,c(1,2),cutFunction)
-if(!all(c(all(markerNames[,1,1]==markerNames[,2,1]),all(markerNames[,1,1]==markerNames[,3,1]),
-          all(markerNames[,1,1]==markerNames[,1,2]),all(markerNames[,1,1]==markerNames[,2,2]),
-          all(markerNames[,1,1]==markerNames[,3,2])))){stop("Subsets don't match")}
+####Tracking progress and turning off completed sections
+subsetCompleted<-T
+useSubsetFiles<-T
+joinCallsListsCompleted<-T
+loadCallsListFromJoinedFile<-T
+useSubsetOfGenotypes<-T
+callsCoded<-F
+markerStatisticsCreated<-F
+loadStatisticsFromFile<-F
 
-#Calculate call file statistics
-csvList<-parApply(cl,fileDf_subset,c(1,2),readCallsAndCounts)
-callsList<-list(calls=bind_cols(lapply(csvList,function(x){x[[1]]})),callsInfo=csvList[[1]][[2]])
-colnames(callsList$calls)
+####Collect list of obList of objects to not remove during bug testing, clean using: eval(parse(text=cleanEnv))
+futureObjectsToNotDelete<-c("baseObjectList","baseEnv","cleanEnv","callsList")
+baseObjectList<-sort(unique(c(ls(),futureObjectsToNotDelete)))
+cleanEnv<-"rm(list = newObj(environment(),baseObjectList));load_all()"
 
-stopCluster(cl)
-callsListList$LxO<-GBSImport(file_calls = fileDf_subset[1,1],fileDf_subset[1,2])
-callsListList$Sim<-GBSImport(file_calls = fileDf_subset[2,1],fileDf_subset[2,2])
-callsListList$Div<-GBSImport(file_calls = fileDf_subset[3,1],fileDf_subset[3,2])
+####Subset input files to common loci
+if(!subsetCompleted){
+    #Check for file paths
+    if(!all(file.exists(fileDf$calls))){stop("Call files not found")}
+    if(!all(file.exists(fileDf$counts))){stop("Count files corresponding to the names of the call files not found")}
+
+    #Produces subset versions of the input call and count files with a combined marker set
+    SubsetCallsAndCountsFiles(fileDf)
+}
+
+####Change input to subset files
+if(useSubsetFiles){
+    fileDf<-apply(fileDf,c(1,2),function(x){paste0(gsub("\\.csv","",x),"_subset.csv")})
+}
+
+####Check if calls and counts are joinable then join
+if(!joinCallsListsCompleted){
+    #Check markers are in common
+    joinDfChecker(fileDf)
+
+    #Import Call and Count files
+    callsListList<-multiCallListImporter(fileDf,datasetNames)
+
+    #Join the call and count files
+    callsList<-joinCallsLists(callsListList,datasetNames)
+
+    #Check if correctly joined and remove the remaining objects if good
+    namesMatch<-colnames(callsList$Calls)==unlist(lapply(callsListList,function(x){colnames(x$Calls)}))
+    if(all(namesMatch)){rm("callsListList");rm("namesMatch")
+    }else{stop("Joining incomplete as indicated by a check of call names")}
+
+    #Save an image state
+    save.image(file.path(storageDir,"image0010_unformattedJoined.R"))
+
+    #Write joined callsList
+    saveLargeList(listToPrint = callsList,baseDir = storageDir,baseName = "joinedCallsList",elementDelim = "__",fileType = "rds")
+}
+
+####Load callsList from file if needed
+if(!exists("callsList")){
+    if(loadCallsListFromJoinedFile){
+        callsList<-loadLargeList(baseDir = storageDir,baseName = "joinedCallsList",fileType = "rds")
+    }else if(!exists("callsList")){
+        stop("No callsList object")
+    }
+}else if(loadCallsListFromJoinedFile){
+    warning("callList exists, skipping load from file")
+}
+
+####Load list of progeny names to be used in mapping
+callsList$SampleData$mapped<-designateProgeny(sampleData = callsList$SampleData,
+                                              callColnames = colnames(callsList$Calls),
+                                              progenyMappedFile = progenyMappedFile,
+                                              useSubsetOfGenotypes = useSubsetOfGenotypes)
+
+####Code mapped calls as 0, 1, 2, or NA if either homozygous major, heterozygous, homozygous minor, or missing
+if(!callsCoded){
+    callsList$CodedCalls<-codeCalls(Calls = callsList$Calls,
+                                    majAlleles = callsList$Alleles[,1],
+                                    minAlleles = callsList$Alleles[,2])
+}
+
+####Create marker statistics
+if(!markerStatisticsCreated){
+
+    #Establish marker info sheet
+    callsList$CallsInfo<-data.frame(stringsAsFactors = F,
+                                    Markers=rownames(callsList$Calls))
+    callsList$CallsInfo$Chr<-gsub("_.*","",callsList$CallsInfo$Markers)
+    callsList$CallsInfo$Pos<-as.numeric(gsub(".*_","",callsList$CallsInfo$Markers))
+    callsList$CallsInfo$cntInner99Logic<-callsList$cntInner99Logic
+    callsList$CallsInfo<-cbind(callsList$CallsInfo,callsList$Alleles)
+
+
+
+    #Start at high cutoff
+    callsList$SampleData$cntMedian<-apply(callsList$CombCount,MARGIN = 2,median,na.rm=T)
+    callsList$SampleData$cntMAD<-apply(callsList$CombCount,MARGIN = 2,mad,na.rm=T)
+    callsList$SampleData$InCntAnalysis<-callsList$SampleData$cntMAD>1&callsList$SampleData$cntMedian>2&callsList$SampleData$mapped
+    callsList$zCnt<-t(t(callsList$CombCount)-callsList$SampleData$cntMedian/callsList$SampleData$cntMAD)
+    callsList$CallsInfo$zCntRow<-rowMeans(callsList$zCnt[,callsList$SampleData$InCntAnalysis],na.rm=T)
+    zCntRowMedian<-median(callsList$CallsInfo$zCntRow,na.rm=T)
+    zCntRowMad<-mad(callsList$CallsInfo$zCntRow,na.rm=T)
+    callsList$CallsInfo$cntInner99.99Logic<-
+        callsList$CallsInfo$zCntRow>=(zCntRowMedian-3.89*zCntRowMad)&
+        callsList$CallsInfo$zCntRow<=(zCntRowMedian+3.89*zCntRowMad)
+    hist(callsList$CallsInfo$zCntRow,100000,xlim=c(zCntRowMedian-3.89*2*zCntRowMad,zCntRowMedian+3.89*2*zCntRowMad))
+    abline(v = c(zCntRowMedian-3.89*zCntRowMad,zCntRowMedian+3.89*zCntRowMad),col="red")
+
+    #Redo with less biased starting parameters
+    callsList$SampleData$cntMedian<-apply(callsList$CombCount[callsList$CallsInfo$cntInner99.99Logic,],MARGIN = 2,median,na.rm=T)
+    callsList$SampleData$cntMAD   <-apply(callsList$CombCount[callsList$CallsInfo$cntInner99.99Logic,],MARGIN = 2,mad   ,na.rm=T)
+    callsList$SampleData$InCntAnalysis<-callsList$SampleData$cntMAD>1&callsList$SampleData$cntMedian>2&callsList$SampleData$mapped
+    callsList$zCnt<-t(t(callsList$CombCount)-callsList$SampleData$cntMedian/callsList$SampleData$cntMAD)
+    callsList$CallsInfo$zCntRow<-rowMeans(callsList$zCnt[,callsList$SampleData$InCntAnalysis],na.rm=T)
+    zCntRowMedian<-median(callsList$CallsInfo$zCntRow,na.rm=T)
+    zCntRowMad<-mad(callsList$CallsInfo$zCntRow,na.rm=T)
+    callsList$CallsInfo$cntInner99Logic<-
+        callsList$CallsInfo$zCntRow>=(zCntRowMedian-2.58*zCntRowMad)&
+        callsList$CallsInfo$zCntRow<=(zCntRowMedian+2.58*zCntRowMad)
+    hist(callsList$CallsInfo$zCntRow[callsList$CallsInfo$cntInner99.99Logic],100000,xlim=c(zCntRowMedian-3.89*zCntRowMad,zCntRowMedian+3.89*zCntRowMad))
+
+    callsList$CallsInfo$hetFreqProg
+
+
+    #Redo at lower cutoffjhhhn bbbn
+    cntMedian<-apply(callsList$CombCount[GbsDf$cntInner99.99Logic,],MARGIN = 2,median)
+    cntMAD   <-apply(callsList$CombCount[GbsDf$cntInner99.99Logic,],MARGIN = 2,mad)
+    GbsDf$zCnt<-t((t(callsList$CombCount)-cntMedian)/cntMAD)
+    GbsDf$zCntRow<-rowMeans(GbsDf$zCnt)
+    zCntRowMedian<-median(GbsDf$zCntRow[GbsDf$cntInner99.99Logic])
+    zCntRowMad<-mad(GbsDf$zCntRow[GbsDf$cntInner99.99Logic])
+    GbsDf$cntInner99Logic<-
+        GbsDf$zCntRow>=(zCntRowMedian-2.58*zCntRowMad)&
+        GbsDf$zCntRow<=(zCntRowMedian+2.58*zCntRowMad)
+
+}
+if(loadStatisticsFromFile){
+}
+
+
+
 

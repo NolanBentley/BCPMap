@@ -102,12 +102,6 @@ GBSImport<-function(file_calls,file_counts,cores=NULL){
                  ncol=ncol(LeftCalls),
                  dimnames = list(Snps,Genotypes)
     )
-    rm(list=c("LeftCalls","RightCalls"))
-    Counts=matrix(paste0(LeftCounts,"/",RightCounts),
-                  nrow=nrow(LeftCounts),
-                  ncol=ncol(LeftCounts),
-                  dimnames = list(Snps,Genotypes)
-    )
 
     MajorCount[LeftMajCnt]<-LeftCounts[LeftMajCnt]
     MinorCount[LeftMinCnt]<-LeftCounts[LeftMinCnt]
@@ -117,6 +111,8 @@ GBSImport<-function(file_calls,file_counts,cores=NULL){
     MinorCount[RightMinCnt]<-RightCounts[RightMinCnt]
     rm(list=c("RightMajCnt","RightMinCnt"))
     print("RD per allele determined.")
+
+    CombCount<-LeftCounts+RightCounts
 
     #Name the outputs
     dimnames(MajorCount)<-list(Snps,Genotypes)
@@ -128,15 +124,20 @@ GBSImport<-function(file_calls,file_counts,cores=NULL){
     #Data to Return
     print("Returning output...!")
 
+    stopCluster(cl)
 
     return(list(Alleles=Alleles,
                 MajorAlleleCount=MajorCount,
                 MinorAlleleCount=MinorCount,
+                CombCount=CombCount,
                 IsMultiAllele=multiallele,
                 Calls=Calls,
-                Counts=Counts
-    )
-    )
+                LeftCalls=LeftCalls,
+                RightCalls=RightCalls,
+                LeftCounts=LeftCounts,
+                RightCounts=RightCounts
+                )
+           )
 }
 
 GBSCallMajMinCoder<-function(calls,majAllele,minAllele){
@@ -149,8 +150,6 @@ GBSCallMajMinCoder<-function(calls,majAllele,minAllele){
     callsCoded[calls==matrix(paste0(minAllele,"/"),nrow=nrow(calls),ncol=ncol(calls))]<-2
     return(callsCoded)
 }
-
-
 
 readCallsAndCounts<-function(rawPath,
                              rowStart=3,
@@ -199,3 +198,14 @@ readCallsAndCounts<-function(rawPath,
     }
 }
 
+multiCallListImporter<-function(fileDf,datasetNames){
+    if(length(datasetNames)!=nrow(fileDf)){stop("Dataset names not equal to number of datasets")}
+    for(i in 1:length(datasetNames)){
+        if(i==1){callsListList<-list()}
+        callsListList[[i]]<-GBSImport(file_calls = fileDf[i,1],fileDf[i,2])
+        if(i==length(datasetNames)){
+            names(callsListList)<-datasetNames
+        }
+    }
+    return(callsListList)
+}
