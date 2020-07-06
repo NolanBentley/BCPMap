@@ -140,6 +140,97 @@ if(!callsCoded){
                                     minAlleles = callsList$Alleles[,2])
 }
 
+####Select markers to be mapped
+parentalInfo<-data.frame(name             = c("Lakota-CSHQ-12-6-s2","LakotaaltHap-s1","LakotamainGenome-s1",
+                                              "87MX3-2-11-CSPB-1-30-s2+s3","87MX3altHap-s1","87MX3mainGenome-s1"),
+                         type             = c("GBS","Sim","Sim" ,"GBS","Sim","Sim" ),
+                         parent           = c("Pat","Pat","Pat" ,"Mat","Mat","Mat" ),
+                         reference        = c("NA" ,"Alt","Main","NA" ,"Alt","Main"),
+                         limit.Called     = c(T    ,T    ,T     ,T    ,F    ,T     ),
+                         limit.Het        = c(T    ,F    ,F     ,T    ,F    ,F     ),
+                         limit.SimCombHet = c(T    ,T    ,T     ,T    ,F    ,F     ),
+                         limit.RDMinHomo  = c(6    ,11   ,11    ,6    ,11   ,11    ),
+                         limit.RDMaxHomo  = c(Inf  ,12   ,12    ,Inf  ,12   ,12    ),
+                         limit.RDMinHet   = c(2    ,0    ,0     ,2    ,0    ,0     ),
+                         limit.RDMaxHet   = c(Inf  ,0    ,0     ,Inf  ,0    ,0     ),
+                         stringsAsFactors = F)
+parentalInfo$SamCol<-match(parentalInfo$name,callsList$SampleData$names)
+
+makeCallsInfo<-function(namedDf,gsubToIsolateSeq="_.*",gsubToIsolatePos=".*_"){
+    callsInfo<-data.frame(Marker=rownames(namedDf),
+                          Chr=gsub(gsubToIsolateSeq,"",rownames(namedDf)),
+                          Pos=as.numeric(gsub(gsubToIsolatePos,"",rownames(namedDf))),
+                          stringsAsFactors = F)
+    callsInfo$RelaPos<-NA
+    for(i in unique(callsInfo$Chr)){
+        currRows<-callsInfo$Chr==i
+        currPos<-callsInfo$Pos[currRows]
+        callsInfo$RelaPos[currRows]<-(currPos-min(currPos))/(max(currPos)-min(currPos))
+    }
+    return(callsInfo)
+}
+
+plotHetSumWin<-function(isHet,callsInfo,win=500000){
+    currHets<-cbind(Het=isHet,callsInfo)
+    uniChr<-unique(currHets$Chr)
+    currHets$WinHet<-NA
+    currHets$WinHetNum<-NA
+    for(j in 1:length(uniChr)){
+        currcurrHets<-currHets[currHets$Chr==uniChr[j],]
+        for(i in 1:nrow(currcurrHets)){
+            lowerLimit<-currcurrHets$Pos[i]-win
+            upperLimit<-currcurrHets$Pos[i]+win
+            currWinHet<-currcurrHets$Het[currcurrHets$Pos>=lowerLimit&currcurrHets$Pos<=upperLimit]
+            currcurrHets$WinHet[i]<-sum(currWinHet)
+            currcurrHets$WinHetNum[i]<-length(currWinHet)
+        }
+        currHets[currHets$Chr==uniChr[j],c("WinHet","WinHetNum")]<-currcurrHets[,c("WinHet","WinHetNum")]
+        print(j)
+    }
+    plot(currHets$RelaPos+as.numeric(gsub("Chr","",currHets$Chr)),currHets$WinHet)
+}
+
+stripSlashesFromCalls<-function(calls){
+    alleles<-paste0(c("A","C","G","T","-"),"/")
+    for(i in alleles){
+        calls[calls==i]<-gsub("/","",i)
+    }
+}
+
+
+
+checkSim<-function(callsList,parental,useCodes=T,homoMinRequired=F){
+
+}
+
+checkSim(hetMain = callsList$
+
+
+applyParentalLimits<-function(callsList,limitControl){
+    ####Applies a variety of filters to markers based on parental sequencing data and saves analysis to calls Info
+    #Initiate callsInfo if needed
+    if(!exists("callsList$CallsInfo")){callsList$callsInfo<-makeCallsInfo(callsList$Calls)}
+
+    #Markers that are potentially maternally segregating
+    currInfo<-parentalInfo[parentalInfo$parent=="Mat"&parentalInfo$limit.Het&parentalInfo$limit.Called,]
+    callsList$callsInfo$MatRD<-
+        matrix(callsList$CombCount [,currInfo$SamCol],ncol=nrow(currInfo))>=matrix(currInfo$limit.RDMinHet,nrow = nrow(callsList$CombCount),ncol = nrow(currInfo))&
+        matrix(callsList$CombCount [,currInfo$SamCol],ncol=nrow(currInfo))<=matrix(currInfo$limit.RDMaxHet,nrow = nrow(callsList$CombCount),ncol = nrow(currInfo))&
+        !is.na(matrix(callsList$CodedCalls[,currInfo$SamCol],ncol=nrow(currInfo)))
+    currHets<-matrix(callsList$CodedCalls[,currInfo$SamCol],ncol=nrow(currInfo))==1
+    currHets[,!currInfo$limit.Het]<-NA
+    callsList$callsInfo$MatHet<-rowMeans(currHets,na.rm=T)==1
+
+
+
+    currHets<-cbind(Het=currLogic[currEligble,],callsList$callsInfo[currEligble,])
+    plotHetSumWin(currLogic[currEligble,],callsList$callsInfo[currEligble,])
+}
+
+
+
+
+
 ####Create marker statistics
 if(!markerStatisticsCreated){
 
