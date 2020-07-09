@@ -8,6 +8,8 @@
 
 ####Load packages
 if(T){
+    require(tidyverse)
+    require(data.table)
     require(devtools)
     require(viridisLite)
     require(parallel)
@@ -26,10 +28,13 @@ if(T){
     initParam$markerRow<-3
     initParam$storageDir<-"../GitExamples"
     initParam$fileDf<-data.frame(stringsAsFactors = F,
-        calls=c("../GitExamples/LxOMapCombinedDivSubset_calls.csv",#This should be the most limiting file to save memory
-                "../GitExamples/LxOSimulatedShotgun_4G_130bp12x25min_Vs_OaxMainV1_3-3-15_20190716_182609_sam_calls.csv",
-                "../GitExamples/PecanCRRDiv_844G_PstI_Vs_Carya_illinoinensis_var_87MX3.mainGenome_3-3-15_20190513_144932_sam_calls.csv"))
+                                 calls=c("/data/HiSeq2500_data/071319_Pecan_LakotaXOaxaca/Realigned/^LxORealigned_144G_ReSeq_Vs_OaxV1_3-3-15_20191107_083500_.*_calls.csv$",#This should be the most limiting file to save memory
+                                         "../GitExamples/LxOSimulatedShotgun_4G_130bp12x25min_Vs_OaxMainV1_3-3-15_20190716_182609_sam_calls.csv",
+                                         "../GitExamples/PecanCRRDiv_844G_PstI_Vs_Carya_illinoinensis_var_87MX3.mainGenome_3-3-15_20190513_144932_sam_calls.csv"))
     initParam$fileDf$counts<-gsub("calls\\.csv","counts.csv",initParam$fileDf$calls)
+    initParam$GrepAndCombineFirstCallString = T
+    initParam$callsCombined<-"../GitExamples/LxOCallsCombined.csv"
+    initParam$countsCombined<-"../GitExamples/LxOCountsCombined.csv"
     initParam$datasetNames<-c("LxO","Sim","Div")
     initParam$progenyMappedFile<-"../GitExamples/SampleNamesMapped.txt"
     initParam$paternalAnalysis<-"./examples/_LakotaFrameworkMarkerSelection.R"
@@ -38,6 +43,7 @@ if(T){
     initParam$P1GP1<-"Mahan-CSV-6-6-s2"
     initParam$P1GP2<-"CRR-Mat-Major-CSV-19-5-s5+s6+s7+s8"
 }
+
 
 
 ####Sourced example customized script files
@@ -50,11 +56,11 @@ if(T){
 ####Tracking progress and turning off completed sections
 if(TRUE){
     progLst<-list()
-    progLst$subsetCompleted<-T
-    progLst$useSubsetFiles<-T
-    progLst$joinCallsListsCompleted<-T
-    progLst$loadCallsListFromJoinedFile<-T
-    progLst$useSubsetOfGenotypes<-T
+    progLst$callsFilesJoined<-T
+    progLst$LargeCallFileCleaned<-T
+    progLst$CallsListImported<-T
+    progLst$loadCallsListFromSavedFiles<-T
+    progLst$useSubsetOfGenotypes<-F
     progLst$callsCoded<-F
     progLst$markerStatisticsCreated<-F
     progLst$loadStatisticsFromFile<-F
@@ -73,47 +79,50 @@ if(T){
 }
 
 
+####Combine first file parts
+if(initParam$GrepAndCombineFirstCallString){
+    if(!progLst$callsFilesJoined){
+        combinedFiles<-joinCallAndCountFiles(callString  = initParam$fileDf$calls [1],
+                                             countString = initParam$fileDf$counts[1],
+                                             combinedCallFile  = initParam$callsCombined,
+                                             combinedCountFile = initParam$countsCombined,
+                                             numPartsExpected=17)
+        initParam$fileDf$calls [1]<-combinedFiles[1]
+        initParam$fileDf$counts[1]<-combinedFiles[2]
+    }else{
+        initParam$fileDf$calls[1] <-initParam$callsCombined
+        initParam$fileDf$counts[1]<-initParam$countsCombined
+        warning("Import set to combine chromosome call files, but progLst indicates this has already been completed. Continuing with combined call and count files.")
+    }
+}
 
-####Subset input files to common loci
-if(!progLst$subsetCompleted){
-    #Check for file paths
-    if(!all(file.exists(initParam$fileDf$calls))){stop("Call files not found")}
-    if(!all(file.exists(initParam$fileDf$counts))){stop("Count files corresponding to the names of the call files not found")}
 
-    #Produces subset versions of the input call and count files with a combined marker set
-    SubsetCallsAndCountsFiles(initParam$fileDf)
+####Subset markers based on missing calls and strip side numbers
+if(!progLst$LargeCallFileCleaned){
+    cleanAndFilterMissing(combinedCallFile,combinedCountFile)
 }
 
 
 
-####Change input to subset files
-if(progLst$useSubsetFiles){
-    initParam$fileDf<-apply(initParam$fileDf,c(1,2),function(x){paste0(gsub("\\.csv","",x),"_subset.csv")})
-}
-
-
-
-####Check if calls and counts are joinable then join
-if(!progLst$joinCallsListsCompleted){
-    #Check markers are in common
-    joinDfChecker(initParam$fileDf)
-
+####Import calls and counts
+if(!progLst$CallsListImported){
     #Import Call and Count files
-    callsListList<-multiCallListImporter(initParam$fileDf,initParam$datasetNames)
+    callsListList<-multiCallListImporter(initParam$fileDf,initParam$datasetNames,min(24,detectCores()-1))
+    saveLargeList(listToPrint = callsListList$LxO,baseDir = initParam$storageDir,baseName = "LxOCallsList",elementDelim = "__",fileType = "rds")
+    saveLargeList(listToPrint = callsListList$Div,baseDir = initParam$storageDir,baseName = "DivCallsList",elementDelim = "__",fileType = "rds")
+    saveLargeList(listToPrint = callsListList$Sim,baseDir = initParam$storageDir,baseName = "SimCallsList",elementDelim = "__",fileType = "rds")
+}
 
-    #Join the call and count files
-    callsList<-joinCallsLists(callsListList,initParam$datasetNames)
 
-    #Check if correctly joined and remove the remaining objects if good
-    namesMatch<-colnames(callsList$Calls)==unlist(lapply(callsListList,function(x){colnames(x$Calls)}))
-    if(all(namesMatch)){rm("callsListList");rm("namesMatch")
-    }else{stop("Joining incomplete as indicated by a check of call names")}
+####Join callLists Together
 
-    #Save an image state
-    save.image(file.path(initParam$storageDir,"image0010_unformattedJoined.R"))
 
-    #Write joined callsList
-    saveLargeList(listToPrint = callsList,baseDir = initParam$storageDir,baseName = "joinedCallsList",elementDelim = "__",fileType = "rds")
+#Make callsList$LxO seperate
+callsList<-callsListList$LxO#joinCallsLists(callsListList,initParam$datasetNames)
+if(exists("callsList")){callsListList$LxO<-NULL}
+
+#Write joined callsList
+
 }
 
 
@@ -225,16 +234,16 @@ if(!progLst$MaternalFrameworkCentimorgansCalculated){
     sizingPolicy(padding = 0, browser.fill = F)
 
     hm1<-heatmaply(hm[plotOrder,],
-                  Colv = F,Rowv = F,
-                  height = 12*nrow(callsList$SampleData))
+                   Colv = F,Rowv = F,
+                   height = 12*nrow(callsList$SampleData))
     saveWidget(hm1,file = "Test1.html")
 
     plot(1:32,
-        (as.numeric(hm[initParam$P1GP1==callsList$SampleData$names,])-
-             as.numeric(hm[initParam$P1GP2==callsList$SampleData$names,]))/
-            (as.numeric(hm[initParam$P1GP1==callsList$SampleData$names,])+
-                 as.numeric(hm[initParam$P1GP2==callsList$SampleData$names,]))
-        )
+         (as.numeric(hm[initParam$P1GP1==callsList$SampleData$names,])-
+              as.numeric(hm[initParam$P1GP2==callsList$SampleData$names,]))/
+             (as.numeric(hm[initParam$P1GP1==callsList$SampleData$names,])+
+                  as.numeric(hm[initParam$P1GP2==callsList$SampleData$names,]))
+    )
     dev.off()
 }
 

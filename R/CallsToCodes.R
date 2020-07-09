@@ -8,3 +8,19 @@ codeCalls<-function(Calls,majAlleles,minAlleles,homoCallAddedText="/"){
     Codes[Calls==matrix(paste0(minAlleles,"/",majAlleles   ),nrow(Calls),ncol(Calls))]<-1
     return(Codes)
 }
+
+adjustCodedCallsByPhase<-function(codes,
+                                  phases,
+                                  homoMajNumber=0,
+                                  hetNumber=1,
+                                  homoMinNumber=1,
+                                  missNumber=0.5){
+    #Recode numbers as needed
+    codesOrig<-codes
+    codes[codesOrig==0]<-homoMajNumber
+    codes[codesOrig==2]<-homoMinNumber
+    codes[codesOrig==1]<-hetNumber
+    #Swap phase on even testcross phases
+    codes[which(phases==2|phases==4),]<-hetNumber-codes[which(phases==2|phases==4),]
+    return(codes)
+}

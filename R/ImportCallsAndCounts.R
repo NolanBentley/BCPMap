@@ -1,11 +1,14 @@
-require("stringi")
-require("pbapply")
-require("parallel")
-require("doSNOW")
+##Imports calls and counts parameters and performs analysis to determine major and minor alleles from Klein-Lab formatted files
+#See call and count file parameters below for details.
 GBSImport<-function(file_calls,file_counts,cores=NULL){
     print("Initializing GBS Import...")
 
     #Parralellize
+    require("stringi")
+    require("pbapply")
+    require("parallel")
+    require("doSNOW")
+    require("data.table")
     if(is.null(cores)){cores<-detectCores()-1}
     cl <- makeCluster(cores)
     registerDoSNOW (cl)
@@ -198,11 +201,11 @@ readCallsAndCounts<-function(rawPath,
     }
 }
 
-multiCallListImporter<-function(fileDf,datasetNames){
+multiCallListImporter<-function(fileDf,datasetNames,cores){
     if(length(datasetNames)!=nrow(fileDf)){stop("Dataset names not equal to number of datasets")}
     for(i in 1:length(datasetNames)){
         if(i==1){callsListList<-list()}
-        callsListList[[i]]<-GBSImport(file_calls = fileDf[i,1],fileDf[i,2])
+        callsListList[[i]]<-GBSImport(file_calls = fileDf[i,1],fileDf[i,2],cores)
         if(i==length(datasetNames)){
             names(callsListList)<-datasetNames
         }

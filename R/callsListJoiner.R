@@ -5,16 +5,20 @@ callsListJoiner<-function(callsListOrigin,
                           boundElements=c("Alleles","MajorAlleleCount","MinorAlleleCount",
                                           "LeftCalls","RightCalls","LeftCounts","RightCounts",
                                           "CombCount","IsMultiAllele","Calls")){
-    #Check formatting of inputs
+    ####Check formatting of inputs
+    #Check if names of list elements are the same excluding SampleData and callsInfo
     if(!all(names(callsListAdded)==names(callsListOrigin)[!names(callsListOrigin)%in%c("SampleData","callsInfo")])){
         stop("irregularity between names of callsLists")
     }
+    #Check if the elements to be combined specifically are in both
     if(!all(c(boundElements%in%names(callsListAdded),
               boundElements%in%names(callsListOrigin)))){
         stop(paste0("callsLists need dataframe elements; '",paste0(boundElements,collapse = "', '"),"'"))
     }
+    #Since callsListOrigin can have already been bound previously, convert it to a matrix before combineing
     callsListOrigin$IsMultiAllele<-as.matrix(callsListOrigin$IsMultiAllele)
-    callsListAdded$IsMultiAllele<-as.matrix(callsListAdded$IsMultiAllele)
+    callsListAdded$IsMultiAllele <-as.matrix(callsListAdded$IsMultiAllele)
+    #Check class of bound elements.
     if(!all(c(sapply(callsListAdded[boundElements],class)=="matrix",
               sapply(callsListAdded[boundElements],class)=="matrix"))){
         stop(paste0("callsLists need matrix objects in elements; '",paste0(boundElements,collapse = "', '"),"'"))
@@ -109,7 +113,7 @@ joinCallsLists<-function(callsListList,datasetNames){
     for(i in 1:(length(datasetNames)-1)){
         if(i==1){
             callsList<-callsListList[[1]]
-            }
+        }
         callsList<-callsListJoiner(callsListOrigin = callsList,
                                    callsListAdded  = callsListList[[i+1]],
                                    callsListNames  = c(origin=datasetNames[i],added=datasetNames[i+1]))
